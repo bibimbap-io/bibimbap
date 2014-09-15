@@ -59,8 +59,10 @@ class JSONParser extends StdTokenParsers with ImplicitConversions with BibimbapP
 }
 
 abstract class JValue {
-  def \(k: String): JValue;
-  def \\(k: String): List[JValue];
+  def \(k: String): JValue
+  def \\(k: String): List[JValue]
+
+  def asOpt[T:JExtractor]: Option[T] = implicitly[JExtractor[T]].extract(this)
 }
 
 case class JObject(fields: Map[String, JValue]) extends JValue {
@@ -84,3 +86,7 @@ case class JInt(v: Int) extends JLit
 case object JTrue  extends JLit
 case object JFalse extends JLit
 case object JNull  extends JLit
+
+trait JExtractor[T] {
+  def extract(j: JValue) : Option[T]
+}

@@ -101,7 +101,7 @@ class SearchDBLP(val repl: ActorRef, val console: ActorRef, val settings: Settin
           case _ => Nil
         }).mkString(" and "))
 
-        val title : MString = (obj \ "title") match {
+        val title : MString = (obj \ "title" \ "text") match {
           case JString(str) => MString.fromJava(cleanupTitle(str))
           case _ => unknown
         }
@@ -124,6 +124,7 @@ class SearchDBLP(val repl: ActorRef, val console: ActorRef, val settings: Settin
 
         val year : Option[MString] = (obj \ "year") match {
           case JInt(bigInt) => Some(MString.fromJava(bigInt.toString))
+          case JString(yr)  => Some(MString.fromJava(yr))
           case _ => None
         }
 
@@ -131,6 +132,12 @@ class SearchDBLP(val repl: ActorRef, val console: ActorRef, val settings: Settin
         (obj \ "type") match {
           case JString("inproceedings") => {
             val (venue,venueYear,pages) = (obj \ "venue") match {
+              case venueObj : JObject => (
+                  (venueObj \ "@conference").asOpt[String].map(cleanupVenue),
+                  None,
+                  (venueObj \ "@pages").asOpt[String].map(cleanupPages)
+              )
+
               case JString(ConfVenueStr1(v, y, p)) => (Some(cleanupVenue(v)), Some(y), Some(cleanupPages(p)))
               case JString(ConfVenueStr2(v, y)) => (Some(cleanupVenue(v)), Some(y), None)
               case JString(os) => console ! Warning("Could not extract venue information from string [" + os + "]."); (None, None, None)
@@ -155,6 +162,14 @@ class SearchDBLP(val repl: ActorRef, val console: ActorRef, val settings: Settin
 
           case JString("article") => {
             val (isCoRR,jour,vol,num,pgs,yr) = (obj \ "venue") match {
+              case venueObj : JObject => (
+                (venueObj \ "text").asOpt[String].exists(_.startsWith("CoRR")),
+                (venueObj \ "@journal").asOpt[String].map(cleanupJournal),
+                (venueObj \ "@volume").asOpt[String],
+                (venueObj \ "@number").asOpt[String],
+                (venueObj \ "@pages").asOpt[String].map(cleanupPages),
+                None
+              )
               case JString(CoRR(_)) => (true, None, None, None, None, None)
               case JString(JourVenueStr1(j,v,n,p,y)) => (false, Some(cleanupJournal(j)), Some(v), Some(n), Some(cleanupPages(p)), Some(y))
               case JString(JourVenueStr2(j,v,p,y)) => (false, Some(cleanupJournal(j)), Some(v), None, Some(cleanupPages(p)), Some(y))
@@ -184,8 +199,13 @@ class SearchDBLP(val repl: ActorRef, val console: ActorRef, val settings: Settin
             }
           }
 
+          // e.g. Pierce Types and Programming Languages
           case JString("book") => {
             val (publisher,yr) = (obj \ "venue") match {
+              case venueObj : JObject => (
+                (venueObj \ "@publisher").asOpt[String],
+                None
+              )
               case JString(BookVenueStr1(p,y)) => (Some(p), Some(y))
               case _ => (None, None)
             }
@@ -228,7 +248,7 @@ class SearchDBLP(val repl: ActorRef, val console: ActorRef, val settings: Settin
   private def completeRecord(res: SearchResult): SearchResult = {
     res.entry.url.map(_.toJava).flatMap(HTTPQueryAsString(_)) match {
       case Some(html) =>
-        val entries = ("""<pre>(.*?)</pre>""".r findAllIn html).toList.map(_.replaceAll("</?(pre|a)[^>]*>", ""))
+        val entries = ("""<pre[^>]*>(.*?)</pre>""".r findAllIn html).toList.map(_.replaceAll("</?(pre|a)[^>]*>", ""))
 
         val parser = new BibTeXParser(Source.fromString(entries.mkString("\n\n")), console ! Warning(_))
 

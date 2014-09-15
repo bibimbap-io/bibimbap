@@ -217,7 +217,8 @@ case class BibTeXEntry(tpe: Option[BibTeXEntryTypes.BibTeXEntryType],
       booktitle.map(_.toJava).getOrElse(
         journal.map(_.toJava).getOrElse(
           school.map(_.toJava).getOrElse(
-            howpublished.map(_.toJava).getOrElse("?"))))
+            publisher.map(_.toJava).getOrElse(
+              howpublished.map(_.toJava).getOrElse("?")))))
 
     val year = this.year.map(_.toJava).getOrElse("?")
 
