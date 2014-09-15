@@ -6,9 +6,9 @@ import io.bibimbap.bibtex._
 import scala.io.Source
 
 import org.scalatest.FunSuite
-import org.scalatest.matchers.ShouldMatchers
+import org.scalatest.Matchers
 
-class BibTeXParsing extends FunSuite with ShouldMatchers {
+class BibTeXParsing extends FunSuite with Matchers {
   def exhaustStream[T](s: Stream[T]): List[T] = s.toList
 
   def entriesAndErrors(str : String) : (List[BibTeXEntry],Int) = {

@@ -6,7 +6,6 @@ import strings._
 import util.StringUtils
 
 import scala.io.Source
-import scala.io.Position
 
 import scala.collection.mutable.{Map=>MutableMap}
 
@@ -393,5 +392,19 @@ class BibTeXParser(src : Source, error : String=>Unit) {
         }
       }
     }
+  }
+
+  object Position {
+    /** Number of bits used to encode the line number */
+    final val LINE_BITS   = 20
+    /** Number of bits used to encode the column number */
+    final val COLUMN_BITS = 31 - LINE_BITS // no negatives => 31
+    /** Mask to decode the line number */
+    final val LINE_MASK   = (1 << LINE_BITS) - 1
+    /** Mask to decode the column number */
+    final val COLUMN_MASK = (1 << COLUMN_BITS) - 1 
+
+    def line(pos: Int): Int = (pos >> COLUMN_BITS) & LINE_MASK
+    def column(pos: Int): Int = pos & COLUMN_MASK
   }
 }

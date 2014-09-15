@@ -3,9 +3,9 @@ package io.bibimbap.tests
 import io.bibimbap.json._
 
 import org.scalatest.FunSuite
-import org.scalatest.matchers.ShouldMatchers
+import org.scalatest.Matchers
 
-class JsonParsing extends FunSuite with ShouldMatchers {
+class JsonParsing extends FunSuite with Matchers {
   private def parsesAs(in : String, v : JValue) {
     (new JSONParser).parse(in) should equal (v)
   }

@@ -48,7 +48,7 @@ class Repl(homeDir: String, configFileName: String, historyFileName: String) ext
   }
 
   def dispatchCommand(cmd: Command) {
-    implicit val timeout = Timeout(365.day)
+    implicit val timeout = Timeout(10.hours)
 
     val results = dispatchMessage[CommandResult](cmd, modules.values.toList) 
 

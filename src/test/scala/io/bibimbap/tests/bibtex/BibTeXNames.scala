@@ -6,9 +6,9 @@ import io.bibimbap.bibtex._
 import scala.io.Source
 
 import org.scalatest.FunSuite
-import org.scalatest.matchers.ShouldMatchers
+import org.scalatest.Matchers
 
-class BibTeXNames extends FunSuite with ShouldMatchers {
+class BibTeXNames extends FunSuite with Matchers {
   // In these tests we use "" instead of None... Just simpler.
   def pam(src : String, first : String, von : String, last : String, jr : String) {
     def lift(str : String) : Option[String] = if(str.isEmpty) None else Some(str)

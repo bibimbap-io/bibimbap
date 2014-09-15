@@ -73,7 +73,7 @@ object Indices {
 }
 
 object FileCompletor {
-  lazy val jlineCompletor = new jline.FileNameCompletor()
+  lazy val jlineCompleter = new jline.console.completer.FileNameCompleter()
 }
 
 case class FileCompletor(prefix: String) {
@@ -88,10 +88,10 @@ case class FileCompletor(prefix: String) {
       val newbuffer = buffer.substring(prefix.length, buffer.length)
       val newpos    = pos - prefix.length
 
-      val list  = new java.util.ArrayList[String]()
-      val index = FileCompletor.jlineCompletor.complete(newbuffer, newpos, list)
+      val list  = new java.util.ArrayList[CharSequence]()
+      val index = FileCompletor.jlineCompleter.complete(newbuffer, newpos, list)
 
-      Some((list.toList, index + prefix.length))
+      Some((list.toList.map(_.toString), index + prefix.length))
     } else {
       None
     }

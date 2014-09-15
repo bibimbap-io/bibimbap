@@ -3,9 +3,9 @@ package io.bibimbap.tests
 import io.bibimbap.strings._
 
 import org.scalatest.FunSuite
-import org.scalatest.matchers.ShouldMatchers
+import org.scalatest.Matchers
 
-class StringConversions extends FunSuite with ShouldMatchers {
+class StringConversions extends FunSuite with Matchers {
   test("Transliteration") {
     def produces(in : String, out : String) {
       MString.fromJava(in).toASCII should equal (out)

@@ -1,7 +1,9 @@
 package io.bibimbap
 
 import akka.actor._
-import jline._
+import jline.console._
+import jline.console.completer._
+import jline.console.history._
 import java.io.{File, FileInputStream, FileDescriptor, PrintWriter, OutputStreamWriter}
 
 class Console(repl: ActorRef, settings: Settings, historyFileName: String) extends Actor with ActorHelpers {
@@ -15,34 +17,7 @@ class Console(repl: ActorRef, settings: Settings, historyFileName: String) exten
 
   var buffer: Option[String] = None
 
-  val terminal = Terminal.setupTerminal() match {
-    case u: UnixTerminal =>
-      new UnixTerminal {
-        override def isSupported = {
-          magicTrick()
-          super.isSupported
-        }
-      }
-    case w: WindowsTerminal =>
-      new WindowsTerminal {
-        override def isSupported = {
-          magicTrick()
-          super.isSupported
-        }
-      }
-
-    case u: UnsupportedTerminal =>
-      new UnsupportedTerminal {
-        override def isSupported = {
-          magicTrick()
-          super.isSupported
-        }
-      }
-  }
-
-  val reader    = new ConsoleReader(new FileInputStream(FileDescriptor.in), 
-                                     new PrintWriter(new OutputStreamWriter(Console.out,
-                                      System.getProperty("jline.WindowsTerminal.output.encoding", System.getProperty("file.encoding")))), null, terminal)
+  val reader    = new ConsoleReader()
 
 
   private def magicTrick(): Unit = buffer match {
@@ -52,8 +27,8 @@ class Console(repl: ActorRef, settings: Settings, historyFileName: String) exten
     case _ =>
   }
 
-  val completor = new Completor {
-    def complete(buffer: String, pos: Int, results: java.util.List[_]): Int = {
+  val completer = new Completer {
+    def complete(buffer: String, pos: Int, results: java.util.List[CharSequence]): Int = {
       import collection.JavaConversions._
 
       val resultsList = results.asInstanceOf[java.util.List[String]]
@@ -75,10 +50,11 @@ class Console(repl: ActorRef, settings: Settings, historyFileName: String) exten
   }
 
   override def preStart() {
-    val history = new History(new File(historyFileName))
+    val history = new FileHistory(new File(historyFileName))
     reader.setHistory(history)
+    reader.setHistoryEnabled(true)
 
-    reader.addCompletor(completor)
+    reader.addCompleter(completer)
   }
 
   private val defaultHandle = "bibimbap> "

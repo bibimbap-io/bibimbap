@@ -4,9 +4,9 @@ package latex
 import io.bibimbap.latex._
 
 import org.scalatest.FunSuite
-import org.scalatest.matchers.ShouldMatchers
+import org.scalatest.Matchers
 
-class LaTeXParsing extends FunSuite with ShouldMatchers {
+class LaTeXParsing extends FunSuite with Matchers {
   private def mkParser = new LaTeXParser with LaTeXElements
 
   private val parser = mkParser

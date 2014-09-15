@@ -4,9 +4,9 @@ import io.bibimbap.bibtex._
 import io.bibimbap.strings._
 
 import org.scalatest.FunSuite
-import org.scalatest.matchers.ShouldMatchers
+import org.scalatest.Matchers
 
-class GitHub004 extends FunSuite with ShouldMatchers {
+class GitHub004 extends FunSuite with Matchers {
   test("Issue #4 : name shortening should not crash.") {
     var errorOccurred : Boolean = false
 
