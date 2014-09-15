@@ -246,11 +246,20 @@ class SearchDBLP(val repl: ActorRef, val console: ActorRef, val settings: Settin
   }
 
   private def completeRecord(res: SearchResult): SearchResult = {
-    res.entry.url.map(_.toJava).flatMap(HTTPQueryAsString(_)) match {
-      case Some(html) =>
-        val entries = ("""<pre[^>]*>(.*?)</pre>""".r findAllIn html).toList.map(_.replaceAll("</?(pre|a)[^>]*>", ""))
+    val urlPref1 = "http://www.dblp.org/rec/bibtex/"
+    val urlPref2 = "http://www.dblp.org/rec/bib2/"
 
-        val parser = new BibTeXParser(Source.fromString(entries.mkString("\n\n")), console ! Warning(_))
+    val url: Option[String] = res.entry.url.map(_.toJava).flatMap { s =>
+      if(s.startsWith(urlPref1)) {
+        Some(urlPref2 + s.substring(urlPref1.length) + ".bib")
+      } else {
+        None
+      }
+    }
+
+    url.flatMap(HTTPQueryAsString(_)) match {
+      case Some(txt) =>
+        val parser = new BibTeXParser(Source.fromString(txt), console ! Warning(_))
 
         parser.entries.toList match {
           // This means we could parse at least one entry. It could have been two, since DBLP shows two entries for conference proceedings,
