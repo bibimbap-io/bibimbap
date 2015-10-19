@@ -31,8 +31,13 @@ trait Module extends Actor with ActorHelpers {
       sender ! CommandSuccess
 
     case os: OnStartup =>
-      startup(os)
-      sender ! CommandSuccess
+      try {
+        startup(os)
+        sender ! CommandSuccess
+      } catch {
+        case e: Exception =>
+          sender ! CommandException(e)
+      }
 
     case os: OnShutdown =>
       shutdown(os)
@@ -93,7 +98,6 @@ trait Module extends Actor with ActorHelpers {
   }
 
   def shutdown(os: OnShutdown) {
-
   }
 
 

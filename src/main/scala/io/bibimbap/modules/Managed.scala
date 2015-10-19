@@ -32,17 +32,17 @@ class Managed(val repl: ActorRef, val console: ActorRef, val settings: Settings)
 
       managedHash  = computeManagedHash()
 
-      val parser = new BibTeXParser(Source.fromFile(managedFile), console ! Error(_))
+      val parser = new BibTeXParser(Source.fromFile(managedFile), err => console ! Error("Error while parsing "+managedFile.getName()+": "+err))
       addEntries(parser.entries)
     }
   }
 
-  override def receive: Receive = {
-    case msg @ OnStartup(os) => {
-      super[Module].receive(msg)
-      loadFile()
-    }
+  override def startup(os: OnStartup) {
+    super.startup(os)
+    loadFile()
+  }
 
+  override def receive: Receive = {
     case Search(terms, limit) =>
       sender ! search(terms, limit)
 
@@ -69,6 +69,9 @@ class Managed(val repl: ActorRef, val console: ActorRef, val settings: Settings)
       }
       sender ! CommandSuccess
 
+    case DoImport(se) =>
+      doImport(se)
+        
     case ImportedResult(res) =>
       // NOOP: we sent this.
 

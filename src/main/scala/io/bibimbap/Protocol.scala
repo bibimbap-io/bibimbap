@@ -65,3 +65,7 @@ case class ReplaceResults(indices: Indices, entries: List[SearchResult]) extends
 // => ImportedResult
 // ASYNC
 case class ImportedResult(res: SearchResult)
+
+// => DoImport
+// ASYNC
+case class DoImport(res: SearchResult)

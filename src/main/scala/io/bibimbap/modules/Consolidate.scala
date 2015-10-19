@@ -10,14 +10,15 @@ import java.io.{FileWriter, File}
 class Consolidate(val repl: ActorRef, val console: ActorRef, val settings: Settings) extends Module {
   val name = "consolidate"
 
-  override val dependsOn = Set("search")
+  override val dependsOn = Set("search", "results")
 
-  lazy val searchModule = modules("search")
+  lazy val searchModule  = modules("search")
+  lazy val resultsModule = modules("results")
 
-  private var consolidater    = sender
+  private var origSender      = sender
   private var consolidatePath = ""
   private var entries         = Stream[BibTeXEntry]()
-  private var entriesCons     = Map[BibTeXEntry, Option[BibTeXEntry]]()
+  private var entriesMap      = Map[BibTeXEntry, Option[BibTeXEntry]]()
 
   def postfixPath(path: String, postfix: String): String = {
     val newPath = path.replaceAll("\\.bib$", postfix+".bib")
@@ -29,29 +30,50 @@ class Consolidate(val repl: ActorRef, val console: ActorRef, val settings: Setti
     }
   }
 
-  def normal: Receive = {
-    case Command2("consolidate", path) =>
-      // First we load entries from path
-      try {
-        val parser      = new BibTeXParser(Source.fromFile(path), console ! Warning(_))
-        consolidatePath = postfixPath(path, "-consolidated")
-        entries         = parser.entries
-        entriesCons     = Map()
-        consolidater    = sender
 
-        if (entries.size > 0) {
-          context.become(consolidating)
+  def normal: Receive = {
+    case Command2("merge", path) =>
+      val origSender = sender
+      // First we load entries from path
+      searchAllOf(path) { (modified, entries) =>
+        console ! Success("Found "+entries.size+" entries ("+modified+" modified):")
+
+        syncCommand(resultsModule, SearchResults(entries.map { e =>
+          SearchResult(e, Set(), 1)
+        }))
+
+        syncCommand(resultsModule, ShowResults(Nil))
+
+        origSender ! CommandSuccess
+      }
+
+    case Command2("consolidate", path) =>
+      val origSender = sender
+
+      // First we load entries from path
+      val consolidatePath = postfixPath(path, "-consolidated")
+      searchAllOf(path) { (modified, entries) =>
+
+        try {
+          val fw = new FileWriter(new File(consolidatePath), false)
+
           for (entry <- entries) {
-            searchModule ! SearchSimilar(entry)
+            fw.write(entry.toString)
+            fw.write("\n\n")
           }
-        } else {
-          finishConsolidation()
+
+          fw.close
+
+          console ! Success("Modified "+modified+" entries.")
+          console ! Success("Consolidated file saved to "+consolidatePath)
+
+          origSender ! CommandSuccess
+        } catch {
+          case e: Throwable =>
+            origSender ! CommandException(e)
         }
 
-      } catch {
-        case e: Throwable =>
-          sender ! CommandException(e)
-          context.become(normal)
+        origSender ! CommandSuccess
       }
 
     case Command2("lint", path) =>
@@ -80,64 +102,69 @@ class Consolidate(val repl: ActorRef, val console: ActorRef, val settings: Setti
       super.receive(x)
   }
 
-  def consolidating: Receive = {
-    case SimilarEntry(oldEntry, optNewEntry) =>
-
-      entriesCons += oldEntry -> optNewEntry
-
-      if (entries.size > 100 && (entriesCons.size % 40 == 0)) {
-        val progress = (entriesCons.size*100d)/entries.size
-        console ! Out("   "+("%3d".format(progress.toInt))+"% ("+entriesCons.size+"/"+entries.size+")")
-      }
-
-      if (entriesCons.size == entries.size) {
-        finishConsolidation()
-      }
-  }
-
-  def finishConsolidation() {
-    var modified = 0
-
-    val results = for (entry <- entries) yield {
-      val entr = entriesCons(entry) match {
-        case Some(newEntry) if newEntry like entry =>
-          var fields = entry.entryMap
-
-          for ((k, v) <- newEntry.entryMap if !fields.contains(k)) {
-            fields += k -> v
-          }
-          BibTeXEntry.fromEntryMap(entry.tpe, entry.key, fields, console ! Error(_)).getOrElse(entry)
-        case _ =>
-          entry
-      }
-
-      if (entr != entry) {
-        modified += 1
-      }
-
-      entr
-    }
-
-
+  def searchAllOf(path: String)(onEnd: (Int, List[BibTeXEntry]) => Unit) = {
     try {
-      val fw = new FileWriter(new File(consolidatePath), false)
+      val parser      = new BibTeXParser(Source.fromFile(path), console ! Warning(_))
+      entries         = parser.entries
+      entriesMap      = Map()
+      origSender      = sender
 
-      for (entry <- results) {
-        fw.write(entry.toString)
-        fw.write("\n\n")
+      if (entries.size > 0) {
+        context.become(processing(onEnd))
+
+        for (entry <- entries) {
+          searchModule ! SearchSimilar(entry)
+        }
+      } else {
+        context.become(normal)
+        onEnd(0, Nil)
       }
 
-      fw.close
-
-      console ! Success("Modified "+modified+" entries.")
-      console ! Success("Consolidated file saved to "+consolidatePath)
-
-      consolidater ! CommandSuccess
     } catch {
       case e: Throwable =>
-        consolidater ! CommandException(e)
+        sender ! CommandException(e)
+        context.become(normal)
     }
-    context.become(normal)
+  }
+
+  def processing(onEnd: (Int, List[BibTeXEntry]) => Unit): Receive = {
+    case SimilarEntry(oldEntry, optNewEntry) =>
+
+      entriesMap += oldEntry -> optNewEntry
+
+      if (entries.size > 100 && (entriesMap.size % 40 == 0)) {
+        val progress = (entriesMap.size*100d)/entries.size
+        console ! Out("   "+("%3d".format(progress.toInt))+"% ("+entriesMap.size+"/"+entries.size+")")
+      }
+
+      if (entriesMap.size == entries.size) {
+
+        // We have all the results now!
+        var modified = 0
+
+        val results = for (entry <- entries) yield {
+          val entr = entriesMap(entry) match {
+            case Some(newEntry) if newEntry like entry =>
+              var fields = entry.entryMap
+
+              for ((k, v) <- newEntry.entryMap if !fields.contains(k)) {
+                fields += k -> v
+              }
+              BibTeXEntry.fromEntryMap(entry.tpe, entry.key, fields, console ! Error(_)).getOrElse(entry)
+            case _ =>
+              entry
+          }
+
+          if (entr != entry) {
+            modified += 1
+          }
+
+          entr
+        }
+
+        context.become(normal)
+        onEnd(modified, results.toList)
+      }
   }
 
   override def receive: Receive = normal

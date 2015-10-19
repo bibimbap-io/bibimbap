@@ -10,7 +10,8 @@ import scala.io.Source
 import scala.collection.mutable.{Map=>MutableMap}
 
 class BibTeXParser(src: Source, error: String=>Unit) {
-  case class BibTeXParseError(msg : String) extends Exception(msg)
+  case class BibTeXParseError(msg : String) extends RuntimeException(msg)
+
   private val lexer = new Lexer
   private case class RawEntry(kind : String, key : String, pairs : Map[String,String])
 
@@ -56,18 +57,23 @@ class BibTeXParser(src: Source, error: String=>Unit) {
       }
       Stream.empty ++ pendingXRef.values.flatten.map(Some(_))
     } else {
-      val e = parseEntry
+      try {
+        val e = parseEntry
 
-      val prefix = e match {
-        case Some(xr) =>
-          val res = pendingXRef(xr.key).map(pe => Some(inlineXRef(pe, xr)))
-          pendingXRef -= xr.key
-          Stream.empty ++ res
-        case None =>
+        val prefix = e match {
+          case Some(xr) =>
+            val res = pendingXRef(xr.key).map(pe => Some(inlineXRef(pe, xr)))
+            pendingXRef -= xr.key
+            Stream.empty ++ res
+          case None =>
+            Stream.empty
+        }
+
+        prefix append Stream.cons(e, rawEntries)
+      } catch {
+        case e: BibTeXParseError =>
           Stream.empty
-      }
-
-      prefix append Stream.cons(e, rawEntries)
+      } 
     }
   }
 
@@ -390,6 +396,9 @@ class BibTeXParser(src: Source, error: String=>Unit) {
           val value = BigInt(builder.toString).toInt
           NUM(value).setPos(tokenPos)
         }
+
+        case c =>
+          ERROR(s"Unexpected character '$c'").setPos(tokenPos)
       }
     }
   }

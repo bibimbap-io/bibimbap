@@ -2,6 +2,7 @@ package io.bibimbap
 
 import scala.reflect.ClassTag
 import akka.actor._
+import akka.actor.SupervisorStrategy._
 import akka.pattern.ask
 import akka.routing.RoundRobinRouter
 import akka.util.Timeout
@@ -47,6 +48,12 @@ class Repl(homeDir: String, configFileName: String, historyFileName: String) ext
 
   }
 
+  override val supervisorStrategy =
+      OneForOneStrategy(maxNrOfRetries = 0, withinTimeRange = 1.minute) {
+        case _: RuntimeException         ⇒ Stop
+        case _: Exception                ⇒ Escalate
+      }
+
   def dispatchCommand(cmd: Command) {
     implicit val timeout = Timeout(10.hours)
 
@@ -56,11 +63,14 @@ class Repl(homeDir: String, configFileName: String, historyFileName: String) ext
       case CommandSuccess  =>
         true
       case CommandException(e)    =>
+        println("WOOT")
         console ! Error(e.getMessage)
         true
       case CommandError(msg)      =>
+        println("WOOTa")
         console ! Error(msg)
         true
+
       case _ =>
         false
     }
