@@ -28,10 +28,10 @@ class SearchDBLP(val repl: ActorRef, val console: ActorRef, val settings: Settin
 
     response.code match {
       case 200 =>
-        val hits = (response.body \ "result" \ "hits" \ "@total").asOpt[Int]
+        val hits = (response.body \ "result" \ "hits" \ "@total").asOpt[String]
 
         hits match {
-          case Some(i) if i > 0 =>
+          case Some(i) if i != "0" =>
             (response.body \ "result" \ "hits" \ "hit").asOpt[List[JsValue]] match {
               case Some(hits) =>
                 SearchResults(hits.flatMap(dblpToSearchResult))
