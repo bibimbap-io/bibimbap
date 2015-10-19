@@ -6,7 +6,7 @@ name := "bibimbap"
 
 version := "0.2.0"
 
-scalaVersion := "2.11.2"
+scalaVersion := "2.11.7"
 
 scalacOptions += "-deprecation"
 
@@ -20,11 +20,14 @@ scalacOptions += "-unchecked"
 
 libraryDependencies ++= Seq(
     "org.scalatest" %% "scalatest" % "2.2.0" % "test",
-    "org.scala-lang.modules" %% "scala-xml" % "1.0.2",
-    "org.scala-lang.modules" %% "scala-parser-combinators" % "1.0.2",
-    "com.typesafe.akka" %% "akka-actor" % "2.3.4",
+    "org.scalaj" %% "scalaj-http" % "1.1.5",
+    "com.typesafe.play" %% "play-json" % "2.4.3",
+    "com.typesafe.akka" %% "akka-actor" % "2.3.8",
+
     "jline" % "jline" % "2.12",
+
     "org.apache.lucene" % "lucene-core" % "3.6.0",
+
     "commons-io" % "commons-io" % "2.4",
     "org.apache.commons" % "commons-lang3" % "3.1"
 )

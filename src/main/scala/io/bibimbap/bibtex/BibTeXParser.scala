@@ -9,7 +9,7 @@ import scala.io.Source
 
 import scala.collection.mutable.{Map=>MutableMap}
 
-class BibTeXParser(src : Source, error : String=>Unit) {
+class BibTeXParser(src: Source, error: String=>Unit) {
   case class BibTeXParseError(msg : String) extends Exception(msg)
   private val lexer = new Lexer
   private case class RawEntry(kind : String, key : String, pairs : Map[String,String])
