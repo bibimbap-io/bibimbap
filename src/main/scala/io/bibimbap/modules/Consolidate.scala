@@ -2,6 +2,11 @@ package io.bibimbap
 package modules
 
 import akka.actor._
+import akka.pattern.{ ask, pipe }
+
+import scala.concurrent.{Future, Await}
+import scala.concurrent.duration.Duration
+
 import bibtex._
 import strings._
 import scala.io.Source
@@ -15,11 +20,6 @@ class Consolidate(val repl: ActorRef, val console: ActorRef, val settings: Setti
   lazy val searchModule  = modules("search")
   lazy val resultsModule = modules("results")
 
-  private var origSender      = sender
-  private var consolidatePath = ""
-  private var entries         = Stream[BibTeXEntry]()
-  private var entriesMap      = Map[BibTeXEntry, Option[BibTeXEntry]]()
-
   def postfixPath(path: String, postfix: String): String = {
     val newPath = path.replaceAll("\\.bib$", postfix+".bib")
 
@@ -31,49 +31,45 @@ class Consolidate(val repl: ActorRef, val console: ActorRef, val settings: Setti
   }
 
 
-  def normal: Receive = {
+  override def receive = {
     case Command2("merge", path) =>
-      val origSender = sender
       // First we load entries from path
-      searchAllOf(path) { (modified, entries) =>
-        console ! Success("Found "+entries.size+" entries ("+modified+" modified):")
 
-        syncCommand(resultsModule, SearchResults(entries.map { e =>
-          SearchResult(e, Set(), 1)
-        }))
+      val (modified, entries) = Await.result(searchAllOf(path), Duration.Inf)
 
-        syncCommand(resultsModule, ShowResults(Nil))
+      console ! Success("Found "+entries.size+" entries ("+modified+" modified):")
 
-        origSender ! CommandSuccess
-      }
+      syncCommand(resultsModule, SearchResults(entries.map { e =>
+        SearchResult(e, Set(), 1)
+      }))
+
+      syncCommand(resultsModule, ShowResults(Nil))
+
+      sender ! CommandSuccess
 
     case Command2("consolidate", path) =>
-      val origSender = sender
-
       // First we load entries from path
+      val (modified, entries) = Await.result(searchAllOf(path), Duration.Inf)
+
       val consolidatePath = postfixPath(path, "-consolidated")
-      searchAllOf(path) { (modified, entries) =>
 
-        try {
-          val fw = new FileWriter(new File(consolidatePath), false)
+      try {
+        val fw = new FileWriter(new File(consolidatePath), false)
 
-          for (entry <- entries) {
-            fw.write(entry.toString)
-            fw.write("\n\n")
-          }
-
-          fw.close
-
-          console ! Success("Modified "+modified+" entries.")
-          console ! Success("Consolidated file saved to "+consolidatePath)
-
-          origSender ! CommandSuccess
-        } catch {
-          case e: Throwable =>
-            origSender ! CommandException(e)
+        for (entry <- entries) {
+          fw.write(entry.toString)
+          fw.write("\n\n")
         }
 
-        origSender ! CommandSuccess
+        fw.close
+
+        console ! Success("Modified "+modified+" entries.")
+        console ! Success("Consolidated file saved to "+consolidatePath)
+
+        sender ! CommandSuccess
+      } catch {
+        case e: Throwable =>
+          sender ! CommandException(e)
       }
 
     case Command2("lint", path) =>
@@ -102,43 +98,25 @@ class Consolidate(val repl: ActorRef, val console: ActorRef, val settings: Setti
       super.receive(x)
   }
 
-  def searchAllOf(path: String)(onEnd: (Int, List[BibTeXEntry]) => Unit) = {
+  def searchAllOf(path: String): Future[(Int, List[BibTeXEntry])] = {
     try {
       val parser      = new BibTeXParser(Source.fromFile(path), console ! Warning(_))
-      entries         = parser.entries
-      entriesMap      = Map()
-      origSender      = sender
 
-      if (entries.size > 0) {
-        context.become(processing(onEnd))
+      val entries = parser.entries
 
-        for (entry <- entries) {
-          searchModule ! SearchSimilar(entry)
+      val progress = Progress.bounded(console, entries.size)
+
+      val fs = for (entry <- entries) yield {
+        (searchModule ? SearchSimilar(entry)).map {
+          case SimilarEntry(oldEntry, optNewEntry) =>
+            progress.tick
+            oldEntry -> optNewEntry
         }
-      } else {
-        context.become(normal)
-        onEnd(0, Nil)
       }
 
-    } catch {
-      case e: Throwable =>
-        sender ! CommandException(e)
-        context.become(normal)
-    }
-  }
+      val emf = Future.fold(fs)(Map[BibTeXEntry, Option[BibTeXEntry]]()) { _ + _ }
 
-  def processing(onEnd: (Int, List[BibTeXEntry]) => Unit): Receive = {
-    case SimilarEntry(oldEntry, optNewEntry) =>
-
-      entriesMap += oldEntry -> optNewEntry
-
-      if (entries.size > 100 && (entriesMap.size % 40 == 0)) {
-        val progress = (entriesMap.size*100d)/entries.size
-        console ! Out("   "+("%3d".format(progress.toInt))+"% ("+entriesMap.size+"/"+entries.size+")")
-      }
-
-      if (entriesMap.size == entries.size) {
-
+      for (entriesMap <- emf) yield {
         // We have all the results now!
         var modified = 0
 
@@ -162,12 +140,13 @@ class Consolidate(val repl: ActorRef, val console: ActorRef, val settings: Setti
           entr
         }
 
-        context.become(normal)
-        onEnd(modified, results.toList)
+        (modified, results.toList)
       }
+    } catch {
+      case e: Throwable =>
+        Future.failed(e)
+    }
   }
-
-  override def receive: Receive = normal
 
   override def complete(buffer: String, pos: Int): (List[String], Int) = {
     val Lint        = FileCompletor("lint ")
