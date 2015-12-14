@@ -39,10 +39,6 @@ trait Module extends Actor with ActorHelpers {
           sender ! CommandException(e)
       }
 
-    case os: OnShutdown =>
-      shutdown(os)
-      sender ! CommandSuccess
-
     case Complete(buffer, pos) =>
       val (res, index) = completeWithHelp(buffer, pos)
       sender ! Completed(res, index)
@@ -96,10 +92,6 @@ trait Module extends Actor with ActorHelpers {
       repl ! Shutdown
     }
   }
-
-  def shutdown(os: OnShutdown) {
-  }
-
 
   val helpItems: Map[String, HelpEntry];
 }

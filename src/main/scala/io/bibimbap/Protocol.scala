@@ -24,7 +24,6 @@ case class Success(msg: String) extends LogMsg;
 trait Command
 case class InputCommand(line: String) extends Command
 case class OnStartup(modules: Map[String, ActorRef]) extends Command;
-case class OnShutdown() extends Command;
 case object Shutdown extends Command;
 
 abstract class CommandResult

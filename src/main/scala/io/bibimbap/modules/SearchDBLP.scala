@@ -2,55 +2,69 @@ package io.bibimbap
 package modules
 
 import akka.actor._
+import scala.concurrent._
+import scala.concurrent.duration._
+
 import bibtex._
 import strings._
 import identifiers.DOI
 
 import play.api.libs.json._
-import scalaj.http._
+import play.api.libs.ws.ning.NingWSClient
+
 import scala.io.Source
 
-class SearchDBLP(val repl: ActorRef, val console: ActorRef, val settings: Settings) extends SearchProvider {
+
+class SearchDBLP(val repl: ActorRef,
+                 val wsClient: NingWSClient,
+                 val console: ActorRef,
+                 val settings: Settings) extends SearchProvider {
   val name   = "Search DBLP"
   val source = "dblp"
 
   private val apiURL     = "http://dblp.uni-trier.de/search/publ/api"
   private val apiBibURL  = "http://dblp.uni-trier.de/rec/bib2/%s.bib"
 
-  override def search(terms: List[String], limit: Int): SearchResults = {
+  val requestTimeout = 1000
 
-    val request = Http(apiURL).param("q", terms.mkString(" "))
-                              .param("h", limit.toString)
-                              .param("format", "json");
+  override def search(terms: List[String], limit: Int): Future[SearchResults] = {
 
-    val response = request.timeout(connTimeoutMs = 1000, readTimeoutMs = 2000)
-                          .execute(parser = { is => Json.parse(is) })
+    val request = wsClient.url(apiURL).withQueryString(
+      "q" -> terms.mkString(" "),
+      "h" -> limit.toString,
+      "format" -> "json"
+    ).withHeaders("Accept" -> "application/json")
+    .withRequestTimeout(requestTimeout)
 
-    response.code match {
-      case 200 =>
-        val hits = (response.body \ "result" \ "hits" \ "@total").asOpt[String]
+    for (response <- request.get) yield {
+      response.status match {
+        case 200 =>
+          val hits = (response.json \ "result" \ "hits" \ "@total").asOpt[String]
 
-        hits match {
-          case Some(i) if i != "0" =>
-            (response.body \ "result" \ "hits" \ "hit").asOpt[List[JsValue]] match {
-              case Some(hits) =>
-                SearchResults(hits.flatMap(dblpToSearchResult))
-              case _ =>
-                console ! Warning("Unexpected json output from DBLP API!")
-                SearchResults(Nil)
-            }
+          hits match {
+            case Some(i) if i != "0" =>
+              (response.json \ "result" \ "hits" \ "hit").asOpt[List[JsValue]] match {
+                case Some(hits) =>
+                  val resF = Future.fold(hits.map(dblpToSearchResult))(List[SearchResult]())(_ ++ _)
 
-          case _ =>
-            SearchResults(Nil)
-        }
+                  SearchResults(Await.result(resF, Duration.Inf))
+                case _ =>
+                  console ! Warning("Unexpected json output from DBLP API!")
+                  SearchResults(Nil)
+              }
 
-      case code =>
-        console ! Warning("Request to DBLP failed with code: "+code)
-        SearchResults(Nil)
+            case _ =>
+              SearchResults(Nil)
+          }
+
+        case code =>
+          console ! Warning("Request to DBLP failed with code: "+code)
+          SearchResults(Nil)
+      }
     }
   }
 
-  private def dblpToSearchResult(record: JsValue): Option[SearchResult] = {
+  private def dblpToSearchResult(record: JsValue): Future[Option[SearchResult]] = {
     val score = (record \ "@score").asOpt[String].map(_.toInt/200d).getOrElse(0d)
 
     val dblpID = (record \ "@id").asOpt[String]
@@ -63,66 +77,69 @@ class SearchDBLP(val repl: ActorRef, val console: ActorRef, val settings: Settin
 
         val bibURL = apiBibURL.format(key)
 
-        val bibResponse = Http(bibURL).asString
+        val request = wsClient.url(bibURL).withRequestTimeout(requestTimeout)
 
-        bibResponse.code match {
-          case 200 =>
-            val bib = bibResponse.body
+        for (response <- request.get()) yield {
+          response.status match {
+            case 200 =>
+              val bib = response.body
 
-            val parser = new BibTeXParser(Source.fromString(bib), console ! Warning(_))
+              val parser = new BibTeXParser(Source.fromString(bib), console ! Warning(_))
 
-            parser.entries.toList match {
-              // This means we could parse at least one entry. It could have
-              // been two, since DBLP shows two entries for conference
-              // proceedings,
-              // but our BibTeX parser inlines the relevant fields from the
-              // second one into the first one anyway.
-              case entry :: _ =>
+              parser.entries.toList match {
+                // This means we could parse at least one entry. It could have
+                // been two, since DBLP shows two entries for conference
+                // proceedings,
+                // but our BibTeX parser inlines the relevant fields from the
+                // second one into the first one anyway.
+                case entry :: _ =>
 
-                // ...and now, a hack to shorten to LNCS, etc.
-                val entry2 = entry.fields.get("series").map { ms =>
-                  val newSeries = ms.toJava match {
-                    case "Lecture Notes in Computer Science"        => MString.fromJava("LNCS")
-                    case "Lecture Notes in Artificial Intelligence" => MString.fromJava("LNAI")
-                    case _ => ms
-                  }
+                  // ...and now, a hack to shorten to LNCS, etc.
+                  val entry2 = entry.fields.get("series").map { ms =>
+                    val newSeries = ms.toJava match {
+                      case "Lecture Notes in Computer Science"        => MString.fromJava("LNCS")
+                      case "Lecture Notes in Artificial Intelligence" => MString.fromJava("LNAI")
+                      case _ => ms
+                    }
 
-                  if(newSeries == ms) {
+                    if(newSeries == ms) {
+                      entry
+                    } else {
+                      entry.copy(fields = entry.fields.updated("series", newSeries))
+                    }
+                  } getOrElse {
                     entry
-                  } else {
-                    entry.copy(fields = entry.fields.updated("series", newSeries))
                   }
-                } getOrElse {
-                  entry
-                }
 
-                // Looking for a doi somewhere in the soup.
-                val doi = entry2.fields.get("ee").flatMap(ms => DOI.extract(ms.toJava))
-                          .orElse(entry2.fields.get("url").flatMap(ms => DOI.extract(ms.toJava)))
+                  // Looking for a doi somewhere in the soup.
+                  val doi = entry2.fields.get("ee").flatMap(ms => DOI.extract(ms.toJava))
+                            .orElse(entry2.fields.get("url").flatMap(ms => DOI.extract(ms.toJava)))
 
-                val entry3 = doi.map { d =>
-                  entry2.updateField("doi", MString.fromJava(d))
-                } getOrElse {
-                  entry2
-                }
+                  val entry3 = doi.map { d =>
+                    entry2.updateField("doi", MString.fromJava(d))
+                  } getOrElse {
+                    entry2
+                  }
 
 
-                Some(SearchResult(entry3, Set(source), score))
+                  Some(SearchResult(entry3, Set(source), score))
 
-              case _ =>
-                None
-            }
+                case _ =>
+                  None
+              }
 
-          case code =>
-            console ! Warning("Request to DBLP .bib file failed with code: "+code)
-            None
+            case code =>
+              console ! Warning("Request to DBLP .bib file failed with code: "+code)
+              None
+          }
         }
 
       case Some(url) =>
         console ! Warning("Unnexpected URL: "+url)
-        None
+        Future(None)
+
       case None =>
-        None
+        Future(None)
     }
   }
 }

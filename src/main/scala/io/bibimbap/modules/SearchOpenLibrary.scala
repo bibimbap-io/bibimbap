@@ -2,6 +2,7 @@ package io.bibimbap
 package modules
 
 import akka.actor._
+import scala.concurrent.Future
 
 import bibtex._
 import strings._
@@ -17,11 +18,12 @@ class SearchOpenLibrary(val repl : ActorRef, val console : ActorRef, val setting
 
   private val apiURL = "http://openlibrary.org/api/books"
 
-  override def search(terms : List[String], limit : Int) : SearchResults = {
+  override def search(terms : List[String], limit : Int): Future[SearchResults] = {
     ISBN.extract(terms.mkString("")) match {
       case Some(isbn) =>
 
         val isbnKey = "ISBN:"+isbn
+
         val request = Http(apiURL).param("bibkeys", isbnKey)
                                   .param("format", "json")
                                   .param("jscmd", "data")
@@ -29,7 +31,7 @@ class SearchOpenLibrary(val repl : ActorRef, val console : ActorRef, val setting
         val response = request.timeout(connTimeoutMs = 1000, readTimeoutMs = 2000)
                               .execute(parser = { is => Json.parse(is) })
 
-        response.code match {
+        Future(response.code match {
           case 200 =>
             (response.body \ isbnKey).asOpt[JsValue] match {
               case Some(hit) =>
@@ -42,10 +44,10 @@ class SearchOpenLibrary(val repl : ActorRef, val console : ActorRef, val setting
           case code =>
             console ! Warning("Request to Open Library failed with code: "+code)
             SearchResults(Nil)
-        }
+        })
 
       case None =>
-        SearchResults(Nil)
+        Future(SearchResults(Nil))
     }
   }
 

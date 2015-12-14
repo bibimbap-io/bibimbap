@@ -44,7 +44,10 @@ class Managed(val repl: ActorRef, val console: ActorRef, val settings: Settings)
 
   override def receive: Receive = {
     case Search(terms, limit) =>
-      sender ! search(terms, limit)
+      val s = sender
+      for (r <- search(terms, limit)) {
+        s ! r
+      }
 
     case Command2("delete", Indices(ids)) =>
       syncMessage[SearchResults](modules("results"), GetResults(ids)) match {

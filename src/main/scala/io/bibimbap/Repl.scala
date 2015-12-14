@@ -12,12 +12,19 @@ import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext
 
+import play.api.libs.ws.ning.NingWSClient
+
+
 class Repl(homeDir: String, configFileName: String, historyFileName: String) extends Actor with ActorHelpers {
   val settings = (new ConfigFileParser(configFileName)).parse.getOrElse(DefaultSettings)
 
   val console = context.actorOf(Props(new Console(self, settings, historyFileName)), name = "Console")
 
   var modules = Map[String, ActorRef]()
+
+  var searchSources = List[io.bibimbap.modules.SearchSource]()
+
+  var wsClient = NingWSClient()
 
   override def preStart = {
     sayHello()
@@ -30,10 +37,10 @@ class Repl(homeDir: String, configFileName: String, historyFileName: String) ext
 
     val managed      = context.actorOf(Props(new Managed(self, console, settings)),      name = "managed");
 
-    val searchSources = List(
+    searchSources = List(
       SearchSource(managed, "managed file"),
       SearchSource(context.actorOf(Props(new SearchLocal(self, console, settings)), name = "searchLocal"), "local cache"),
-      SearchSource(context.actorOf(Props(new SearchDBLP(self, console, settings)), name = "searchDBLP"), "DBLP"),
+      SearchSource(context.actorOf(Props(new SearchDBLP(self, wsClient, console, settings)), name = "searchDBLP"), "DBLP"),
       SearchSource(context.actorOf(Props(new SearchOpenLibrary(self, console, settings)), name = "searchOpenLibrary"), "Open Library")
     )
 
@@ -110,10 +117,13 @@ class Repl(homeDir: String, configFileName: String, historyFileName: String) ext
 
       self ! ReadLine()
     case Shutdown =>
-      dispatchCommand(OnShutdown())
+      val allModules = modules.values.toSet
+
       console ! Out("Bye.")
-      // TODO: find a better way to exit
-      sys.exit(0)
+
+      context.system.shutdown
+
+      wsClient.close
   }
 
   private def sayHello() {

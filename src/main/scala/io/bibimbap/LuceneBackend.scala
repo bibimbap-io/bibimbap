@@ -3,6 +3,7 @@ package io.bibimbap
 import bibtex._
 import strings._
 
+import scala.concurrent.Future
 import akka.actor.ActorRef
 
 import java.io.File
@@ -205,12 +206,12 @@ trait LuceneSearchProvider extends SearchProvider {
     initializeIndex()
   }
 
-  override def search(terms: List[String], limit: Int): SearchResults = {
+  override def search(terms: List[String], limit: Int): Future[SearchResults] = {
     val query = terms.mkString(" ").trim
     if(query.isEmpty) {
-      SearchResults(Nil)
+      Future(SearchResults(Nil))
     } else {
-      SearchResults(searchLucene(query, limit))
+      Future(SearchResults(searchLucene(query, limit)))
     }
   }
 

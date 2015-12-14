@@ -21,7 +21,9 @@ scalacOptions += "-unchecked"
 libraryDependencies ++= Seq(
     "org.scalatest" %% "scalatest" % "2.2.0" % "test",
     "org.scalaj" %% "scalaj-http" % "1.1.5",
-    "com.typesafe.play" %% "play-json" % "2.4.3",
+    "com.typesafe.play" %% "play-json" % "2.4.5",
+    "com.typesafe.play" %% "play-ws" % "2.4.5",
+
     "com.typesafe.akka" %% "akka-actor" % "2.3.8",
 
     "jline" % "jline" % "2.12",
