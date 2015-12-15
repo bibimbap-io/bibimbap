@@ -16,12 +16,17 @@ import org.apache.lucene.search._
 import org.apache.lucene.store._
 import org.apache.lucene.util.Version
 
+import scala.concurrent.ExecutionContext
+
 trait LuceneBackend {
   private val JAVAPREFIX = "java-"
   private val LATEXPREFIX = "latex-"
 
-  val console: ActorRef
+  implicit val ec: ExecutionContext
+  val ctx: Context
   val source: String
+
+  import ctx._
 
   private val analyzer = new StandardAnalyzer(Version.LUCENE_36)
 
@@ -192,7 +197,7 @@ trait LuceneHDDBackend extends LuceneBackend {
       initializeIndex()
     } catch {
       case ioe : IOException =>
-        console ! Warning(ioe.getLocalizedMessage)
+        ctx.console ! Warning(ioe.getLocalizedMessage)
     }
   }
 
@@ -206,12 +211,12 @@ trait LuceneSearchProvider extends SearchProvider {
     initializeIndex()
   }
 
-  override def search(terms: List[String], limit: Int): Future[SearchResults] = {
+  override def search(terms: List[String], limit: Int): Future[List[SearchResult]] = {
     val query = terms.mkString(" ").trim
     if(query.isEmpty) {
-      Future(SearchResults(Nil))
+      Future(Nil)
     } else {
-      Future(SearchResults(searchLucene(query, limit)))
+      Future(searchLucene(query, limit))
     }
   }
 

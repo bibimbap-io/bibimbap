@@ -12,10 +12,8 @@ import strings._
 import scala.io.Source
 import java.io.{FileWriter, File}
 
-class Consolidate(val repl: ActorRef, val console: ActorRef, val settings: Settings) extends Module {
+class Consolidate(val ctx: Context) extends Module {
   val name = "consolidate"
-
-  override val dependsOn = Set("search", "results")
 
   lazy val searchModule  = modules("search")
   lazy val resultsModule = modules("results")
@@ -45,7 +43,7 @@ class Consolidate(val repl: ActorRef, val console: ActorRef, val settings: Setti
 
       syncCommand(resultsModule, ShowResults(Nil))
 
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
     case Command2("consolidate", path) =>
       // First we load entries from path
@@ -65,11 +63,11 @@ class Consolidate(val repl: ActorRef, val console: ActorRef, val settings: Setti
 
         console ! Success("Modified "+modified+" entries.")
         console ! Success("Consolidated file saved to "+consolidatePath)
-
-        sender ! CommandSuccess
       } catch {
-        case e: Throwable =>
-          sender ! CommandException(e)
+        case e: Throwable => 
+          console ! Error(e.getMessage)
+      } finally {
+        sender ! CommandProcessed
       }
 
     case Command2("lint", path) =>
@@ -88,10 +86,11 @@ class Consolidate(val repl: ActorRef, val console: ActorRef, val settings: Setti
 
         console ! Success("Reformatted file saved to "+newPath)
 
-        sender ! CommandSuccess
       } catch {
-        case e: Throwable =>
-          sender ! CommandException(e)
+        case e: Throwable => 
+          console ! Error(e.getMessage)
+      } finally {
+        sender ! CommandProcessed
       }
 
     case x =>

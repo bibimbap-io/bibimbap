@@ -2,37 +2,47 @@ package io.bibimbap
 package modules
 
 import akka.actor._
+import scala.concurrent.Future
+import akka.pattern.{ask, pipe}
 import java.util.concurrent.TimeoutException
 
 import bibtex._
 
-case class SearchSource(actor: ActorRef, name: String, var isActive: Boolean = true)
 
-class Search(val repl: ActorRef,
-             val console: ActorRef,
-             val settings: Settings,
-             var searchSources: List[SearchSource]) extends Module {
+class Search(val ctx: Context) extends Module {
+
+  case class SearchSource(actor: ActorRef, name: String, var isActive: Boolean = true)
 
   val name = "search"
 
-  override val dependsOn = Set("results")
+  var searchSources = List[SearchSource]();
 
   lazy val resultsModule = modules("results")
 
-  private def addSource(path: String) {
-    val actor = context.actorOf(Props(new SearchBibtex(self, console, settings, path)))
+  override def postInitialization() = {
+    searchSources = List(
+      SearchSource(modules("managed"), "managed file"),
+      SearchSource(context.actorOf(Props(classOf[SearchLocal], ctx),       name = "searchLocal"), "local cache"),
+      SearchSource(context.actorOf(Props(classOf[SearchDBLP], ctx),        name = "searchDBLP"), "DBLP"),
+      SearchSource(context.actorOf(Props(classOf[SearchOpenLibrary], ctx), name = "searchOpenLibrary"), "Open Library")
+    )
+  }
 
-    syncCommand(actor, Start) match {
-      case Some(CommandSuccess) =>
+  private def addSource(path: String): Future[CommandResult] = {
+    val actor = context.actorOf(Props(classOf[SearchBibtex], ctx, path))
+
+    for {
+      r <- (actor ? InitializeSource).mapTo[Boolean]
+    } yield {
+      if (r) {
         searchSources = searchSources :+ SearchSource(actor, "bibtex: "+path)
-        console ! Success("Source added!")
-      case Some(CommandError(err)) =>
-        console ! Error("Error adding source: "+err)
-      case Some(CommandException(e)) =>
-        console ! Error("Error adding source: "+e.getMessage)
-      case _ =>
-    }
+        console ! Success("Source '"+path+"' loaded")
+      } else {
+        console ! Error("Failed to load source '"+path+"'")
+      }
 
+      CommandProcessed
+    }
   }
 
   override def receive: Receive = {
@@ -41,14 +51,14 @@ class Search(val repl: ActorRef,
         val spc = if ((i < 10) && (searchSources.size > 10)) " " else ""
 
         val status = if(s.isActive) {
-          settings.GREEN+"on "+settings.RESET 
+          settings.GREEN+"on "+settings.RESET
         } else {
-          settings.RED+"off"+settings.RESET 
+          settings.RED+"off"+settings.RESET
         }
 
         console ! Out(" "+status+" "+spc+"["+i+"] "+s.name)
       }
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
     case Command3("sources", "enable", Indices(ids)) =>
       ids.within(searchSources) match {
@@ -60,7 +70,7 @@ class Search(val repl: ActorRef,
         case None =>
           console ! Error("Invalid source")
       }
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
     case Command3("sources", "disable", Indices(ids)) =>
       ids.within(searchSources) match {
@@ -72,23 +82,23 @@ class Search(val repl: ActorRef,
         case None =>
           console ! Error("Invalid source")
       }
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
     case Command3("sources", "add", path) =>
-      addSource(path)
-      sender ! CommandSuccess
+      addSource(path) pipeTo sender
 
     case Command2("load", path) =>
-      addSource(path)
-      sender ! CommandSuccess
+      addSource(path) pipeTo sender
 
     case CommandL("search", args) =>
-      val results = doSearch(args, 10)
 
-      syncCommand(resultsModule, SearchResults(results))
-      syncCommand(resultsModule, ShowResults(args))
+      val r = for {
+        results <- doSearch(args, 10)
+        r1 <- resultsModule ? SearchResults(results)
+        r2 <- resultsModule ? ShowResults(args)
+      } yield { CommandProcessed }
 
-      sender ! CommandSuccess
+      r pipeTo sender
 
     case ImportedResult(res) =>
       for (m <- searchSources.map(_.actor)) {
@@ -96,13 +106,15 @@ class Search(val repl: ActorRef,
       }
 
     case Search(terms, limit) =>
-      val results = doSearch(terms, limit)
-      sender ! SearchResults(results)
+      doSearch(terms, limit) pipeTo sender
 
     case SearchSimilar(entry: BibTeXEntry) =>
       if (preciseEnough(entry)) {
-        val results = doSearch(termsFromEntry(entry), 1)
-        sender ! SimilarEntry(entry, results.headOption.map(_.entry))
+        val r = for (results <- doSearch(termsFromEntry(entry), 1)) yield {
+          SimilarEntry(entry, results.headOption.map(_.entry))
+        }
+
+        r pipeTo sender
       } else {
         sender ! SimilarEntry(entry, None)
       }
@@ -121,15 +133,68 @@ class Search(val repl: ActorRef,
 
   def activeSources: List[SearchSource] = searchSources.filter(_.isActive)
 
-  private def doSearch(args: List[String], limit: Int): List[SearchResult] = {
-    try {
-      val resultsPerSearch = dispatchMessage[SearchResults](Search(args, limit), activeSources.map(_.actor))
-      combineResults(resultsPerSearch)
-    } catch {
-      case e: TimeoutException =>
-        console ! Error("Failed to gather search results in time")
-        Nil
+  private def doSearch(args: List[String], limit: Int): Future[List[SearchResult]] = {
+
+    val searches = for (ss <- activeSources.map(_.actor)) yield {
+      (ss ? Search(args, limit)).mapTo[List[SearchResult]]
     }
+
+    def mergeResults(existing: List[SearchResult], fresh: List[SearchResult]): List[SearchResult] = {
+      var equivClasses = Map[SearchResult, List[SearchResult]]() ++ existing.map(e => e -> List(e))
+
+      for (res <- fresh) {
+        equivClasses.keySet.find(k => k.entry like res.entry) match {
+          case Some(k) =>
+            // Found a matching equiv class
+            equivClasses += k -> (equivClasses(k) :+ res)
+
+          case None =>
+            equivClasses += res -> List(res)
+        }
+      }
+
+      val results = for ((v, alts) <- equivClasses) yield {
+        if (alts.size == 1) {
+          Some(v)
+        } else {
+          val main   = alts.find(_.sources contains "managed").getOrElse(alts.head)
+          val others = alts diff List(main)
+
+          val mainEntry = main.entry
+
+          var fields = mainEntry.entryMap
+
+          for (entry <- others.map(_.entry); (k, v) <- entry.entryMap if !fields.contains(k)) {
+            fields += k -> v
+          }
+
+          val tpe = alts.map(_.entry.tpe).reduceLeft(_ orElse _)
+
+          BibTeXEntry.fromEntryMap(tpe, mainEntry.key, fields, console ! Error(_)) match {
+            case Some(newEntry) =>
+              if (newEntry != mainEntry) {
+                Some(SearchResult(newEntry,
+                             alts.flatMap(_.sources).toSet,
+                             alts.map(_.relevance).max,
+                             isEdited     = alts.exists(_.isEdited),
+                             isManaged    = alts.exists(_.isManaged),
+                             oldEntry     = alts.map(_.oldEntry).reduceLeft(_ orElse _),
+                             alternatives = alts.map(_.entry).toSet
+                           ))
+              } else {
+                // We keep only the managed one if it remains the same
+                Some(main)
+              }
+            case _ =>
+              None
+          }
+        }
+      }
+
+      results.flatten.toList.sortBy(r => -r.relevance)
+    }
+
+    Future.fold(searches)(List[SearchResult]())(mergeResults)
   }
 
   private def combineResults(resultss: List[SearchResults]): List[SearchResult]= {

@@ -12,10 +12,8 @@ import java.io.{File, FileWriter}
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 
-class Managed(val repl: ActorRef, val console: ActorRef, val settings: Settings) extends Module
-                                                                                    with LuceneRAMBackend
-                                                                                    with LuceneSearchProvider {
-  val name = "Managed"
+class Managed(val ctx: Context) extends Module with LuceneRAMBackend with LuceneSearchProvider {
+  val name = "managed"
 
   val source = "managed"
 
@@ -37,8 +35,7 @@ class Managed(val repl: ActorRef, val console: ActorRef, val settings: Settings)
     }
   }
 
-  override def startup(os: OnStartup) {
-    super.startup(os)
+  override def postInitialization() = {
     loadFile()
   }
 
@@ -58,7 +55,7 @@ class Managed(val repl: ActorRef, val console: ActorRef, val settings: Settings)
         case None =>
           console ! Error("Invalid search result")
       }
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
 
     case Command2("import", Indices(ids)) =>
@@ -70,7 +67,7 @@ class Managed(val repl: ActorRef, val console: ActorRef, val settings: Settings)
         case None =>
           console ! Error("Invalid search result")
       }
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
     case DoImport(se) =>
       doImport(se)
@@ -209,4 +206,6 @@ class Managed(val repl: ActorRef, val console: ActorRef, val settings: Settings)
     "delete" -> HelpEntry("delete <result>",  "Delete the <result>th from the managed file"),
     "import" -> HelpEntry("import <result>",  "Imports the <result>th item from the last search results into managed bib file")
   )
+
+  override implicit val ec = context.system.dispatcher
 }

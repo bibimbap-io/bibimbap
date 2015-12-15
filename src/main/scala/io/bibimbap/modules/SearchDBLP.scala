@@ -4,6 +4,7 @@ package modules
 import akka.actor._
 import scala.concurrent._
 import scala.concurrent.duration._
+import java.util.concurrent.TimeoutException
 
 import bibtex._
 import strings._
@@ -15,28 +16,24 @@ import play.api.libs.ws.ning.NingWSClient
 import scala.io.Source
 
 
-class SearchDBLP(val repl: ActorRef,
-                 val wsClient: NingWSClient,
-                 val console: ActorRef,
-                 val settings: Settings) extends SearchProvider {
+class SearchDBLP(val ctx: Context) extends SearchProvider {
   val name   = "Search DBLP"
   val source = "dblp"
+
+  import ctx._
 
   private val apiURL     = "http://dblp.uni-trier.de/search/publ/api"
   private val apiBibURL  = "http://dblp.uni-trier.de/rec/bib2/%s.bib"
 
-  val requestTimeout = 1000
-
-  override def search(terms: List[String], limit: Int): Future[SearchResults] = {
-
+  override def search(terms: List[String], limit: Int): Future[List[SearchResult]] = {
     val request = wsClient.url(apiURL).withQueryString(
       "q" -> terms.mkString(" "),
       "h" -> limit.toString,
       "format" -> "json"
     ).withHeaders("Accept" -> "application/json")
-    .withRequestTimeout(requestTimeout)
+    .withRequestTimeout(2000)
 
-    for (response <- request.get) yield {
+    (for (response <- request.get) yield {
       response.status match {
         case 200 =>
           val hits = (response.json \ "result" \ "hits" \ "@total").asOpt[String]
@@ -47,20 +44,28 @@ class SearchDBLP(val repl: ActorRef,
                 case Some(hits) =>
                   val resF = Future.fold(hits.map(dblpToSearchResult))(List[SearchResult]())(_ ++ _)
 
-                  SearchResults(Await.result(resF, Duration.Inf))
+                  Await.result(resF, Duration.Inf)
                 case _ =>
                   console ! Warning("Unexpected json output from DBLP API!")
-                  SearchResults(Nil)
+                  Nil
               }
 
             case _ =>
-              SearchResults(Nil)
+              Nil
           }
 
         case code =>
           console ! Warning("Request to DBLP failed with code: "+code)
-          SearchResults(Nil)
+          Nil
       }
+    }).recover {
+      case to: TimeoutException =>
+        console ! Warning("Timeout reached while querying DBLP! Please try another time")
+        Nil
+
+      case ex =>
+        console ! Error("Unnexpected Error: "+ex.getMessage)
+        Nil
     }
   }
 
@@ -77,9 +82,9 @@ class SearchDBLP(val repl: ActorRef,
 
         val bibURL = apiBibURL.format(key)
 
-        val request = wsClient.url(bibURL).withRequestTimeout(requestTimeout)
+        val request = wsClient.url(bibURL).withRequestTimeout(1000)
 
-        for (response <- request.get()) yield {
+        (for (response <- request.get()) yield {
           response.status match {
             case 200 =>
               val bib = response.body
@@ -132,6 +137,14 @@ class SearchDBLP(val repl: ActorRef,
               console ! Warning("Request to DBLP .bib file failed with code: "+code)
               None
           }
+        }).recover {
+          case to: TimeoutException => 
+            console ! Warning("Timeout reached while fetching detailed record '"+key+"'")
+            None
+
+          case ex =>
+            console ! Error("Unnexpected error while fetching detailed record: "+ex.getMessage)
+            None
         }
 
       case Some(url) =>

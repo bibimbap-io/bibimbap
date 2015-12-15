@@ -2,28 +2,25 @@ package io.bibimbap
 
 import akka.actor._
 import com.typesafe.config.ConfigFactory
+import java.util.concurrent.CountDownLatch
 
 object Main {
-  def main(args : Array[String]) : Unit = run(args, None)
-
-  def boot(args : Array[String], cl : ClassLoader) : Unit = run(args, Some(cl))
-
-  private def run(args : Array[String], cl : Option[ClassLoader]) : Unit = {
+  def main(args: Array[String]): Unit = {
     val homeDir = System.getProperty("user.home") + System.getProperty("file.separator")
 
     val configFileName = homeDir + ".bibimbapconfig"
     val historyFileName = homeDir + ".bibimbaphistory"
 
-    val system  = cl.map { c =>
-      ActorSystem("bibimbap", ConfigFactory.load(c), c)
-    } getOrElse {
-      ActorSystem("bibimbap")
-    }
+    val system  = ActorSystem("bibimbap")
 
-    val settings = (new ConfigFileParser(configFileName)).parse.getOrElse(DefaultSettings)
+    val latch = new CountDownLatch(1)
 
-    val repl = system.actorOf(Props(new Repl(homeDir, configFileName, historyFileName)), name = "repl")
+    val repl = system.actorOf(Props(classOf[Repl], latch, homeDir, configFileName, historyFileName), name = "repl")
 
     repl ! Start
+
+    latch.await()
+    system.shutdown()
+    system.awaitTermination()
   }
 }

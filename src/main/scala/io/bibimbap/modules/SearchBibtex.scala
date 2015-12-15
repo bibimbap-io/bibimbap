@@ -8,25 +8,26 @@ import bibtex._
 
 import scala.io.Source
 
-class SearchBibtex(val repl: ActorRef, val console: ActorRef, val settings: Settings, val path: String) extends LuceneRAMBackend
-                                                                                                        with LuceneSearchProvider {
+class SearchBibtex(val ctx: Context, val path: String) extends LuceneRAMBackend with LuceneSearchProvider {
   val name = "SearchBibtex"
 
   val source = "bibtex - "+path
 
+  import ctx._
+
   override def receive: Receive = {
-    case Start =>
+    case InitializeSource =>
       try {
         val parser = new BibTeXParser(Source.fromFile(path), console ! Warning(_))
         addEntries(parser.entries)
-        sender ! CommandSuccess
+
+        sender ! true
       } catch {
         case e: Throwable =>
-          sender ! CommandException(e)
+          console ! Error(e.getMessage)
+          sender ! false
       }
     case x =>
       super.receive(x)
-    }
-
-
+  }
 }

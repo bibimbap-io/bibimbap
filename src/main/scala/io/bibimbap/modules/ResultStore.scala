@@ -4,7 +4,7 @@ package modules
 import akka.actor._
 import bibtex._
 
-class ResultStore(val repl: ActorRef, val console: ActorRef, val settings: Settings) extends Module {
+class ResultStore(val ctx: Context) extends Module {
   val name = "results"
 
   private var results = List[SearchResult]()
@@ -12,7 +12,7 @@ class ResultStore(val repl: ActorRef, val console: ActorRef, val settings: Setti
   override def receive: Receive = {
     case Command1("list") | Command1("show") | Command1("last") =>
       displayResults(Nil)
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
     case Command2("bib", Indices(ids)) =>
       ids.within(results) match {
@@ -23,7 +23,7 @@ class ResultStore(val repl: ActorRef, val console: ActorRef, val settings: Setti
         case None =>
           console ! Error("Invalid search result")
       }
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
     case Command2("open", Indices(ids)) =>
       ids.within(results) match {
@@ -34,7 +34,7 @@ class ResultStore(val repl: ActorRef, val console: ActorRef, val settings: Setti
         case None =>
           console ! Error("Invalid search result")
       }
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
     case Command2("show", Indices(ids)) =>
       ids.within(results) match {
@@ -45,12 +45,12 @@ class ResultStore(val repl: ActorRef, val console: ActorRef, val settings: Setti
         case None =>
           console ! Error("Invalid search result")
       }
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
     case SearchResults(newResults) =>
       results = newResults
 
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
     case ReplaceResults(ids, newResults) =>
       ids.within(results) match {
@@ -59,14 +59,14 @@ class ResultStore(val repl: ActorRef, val console: ActorRef, val settings: Setti
         case None =>
           console ! Error("Invalid search result")
       }
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
     case GetResults(ids) =>
       sender ! SearchResults(ids.within(results).getOrElse(Nil))
 
     case ShowResults(terms) =>
       displayResults(terms)
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
     case x =>
       super.receive(x)
@@ -110,6 +110,10 @@ class ResultStore(val repl: ActorRef, val console: ActorRef, val settings: Setti
   private def doShow(res: SearchResult) {
     def inBold(str: String): String    = settings.BOLD+str+settings.RESET
     def inRedBold(str: String): String = settings.BOLD+settings.RED+str+settings.RESET
+
+    console ! Out("  Source(s)  : "+res.sources.mkString(", "))
+    console ! Out("")
+
     res.entry.display(console ! Out(_), inBold, inRedBold)
   }
 

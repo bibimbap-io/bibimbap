@@ -2,20 +2,22 @@ package io.bibimbap
 
 import scala.reflect.ClassTag
 import akka.actor._
-import akka.util.Timeout
 import akka.pattern.ask
-import akka.util.Timeout
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
+import play.api.libs.ws.ning.NingWSClient
+
 trait Module extends Actor with ActorHelpers {
-  val settings: Settings
-  val console: ActorRef
-  val repl: ActorRef
+  val ctx: Context
+
+  val settings: Settings     = ctx.settings
+  val console: ActorRef      = ctx.console
+  val repl: ActorRef         = ctx.repl
+  val wsClient: NingWSClient = ctx.wsClient
 
   val name: String
 
-  val dependsOn = Set[String]()
   var modules   = Map[String, ActorRef]()
 
   def receive: Receive = {
@@ -23,25 +25,25 @@ trait Module extends Actor with ActorHelpers {
       if (helpItems contains command) {
         helpItems(command).display(console)
       }
-      sender ! CommandSuccess
+      sender ! CommandProcessed
+
     case Command1("help" | "?") =>
       for ((command, hi) <- helpItems) {
         helpItems(command).displayShort(console)
       }
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
-    case os: OnStartup =>
-      try {
-        startup(os)
-        sender ! CommandSuccess
-      } catch {
-        case e: Exception =>
-          sender ! CommandException(e)
-      }
+    case InitializeModule(mods) =>
+      modules = mods
+      preInitialization()
+      sender ! ModuleInitialized(name)
 
-    case Complete(buffer, pos) =>
+    case Start =>
+      postInitialization()
+
+    case AutoComplete(buffer, pos) =>
       val (res, index) = completeWithHelp(buffer, pos)
-      sender ! Completed(res, index)
+      sender ! AutoCompleted(res, index)
 
     case InputCommand(line) =>
       var foundPartial = false
@@ -53,13 +55,21 @@ trait Module extends Actor with ActorHelpers {
         foundPartial = true;
       }
       if (foundPartial) {
-        sender ! CommandSuccess
+        sender ! CommandProcessed
       } else {
-        sender ! CommandUnknown
+        sender ! CommandProcessed
       }
 
     case _ =>
       sender ! CommandUnknown
+  }
+
+  def preInitialization() = {
+
+  }
+
+  def postInitialization() = {
+
   }
 
   def complete(buffer: String, pos: Int): (List[String], Int) = {
@@ -77,19 +87,6 @@ trait Module extends Actor with ActorHelpers {
       complete(buffer, pos)
     } else {
       (results, 0)
-    }
-  }
-
-  def startup(os: OnStartup) {
-    modules = os.modules;
-
-    val depsFound = modules.keySet & dependsOn
-
-    if (depsFound.size < dependsOn.size) {
-      for (dep <- dependsOn if !(modules contains dep)) {
-        console ! Error("Missing dependency: module '"+name+"' requires module '"+dep+"'")
-      }
-      repl ! Shutdown
     }
   }
 

@@ -7,12 +7,12 @@ import strings._
 
 import java.io.File
 
-class SearchLocal(val repl: ActorRef, val console: ActorRef, val settings: Settings) extends SearchProvider with LuceneHDDBackend with LuceneSearchProvider {
+class SearchLocal(val ctx: Context) extends SearchProvider with LuceneHDDBackend with LuceneSearchProvider {
   val name = "SearchLocal"
 
   val source = "cache"
 
-  protected val cacheDir = new File(settings("general", "dir.cache"))
+  protected val cacheDir = new File(ctx.settings("general", "dir.cache"))
 
   override def onImport(res: SearchResult) {
     addEntry(res.entry)

@@ -5,10 +5,8 @@ import akka.actor._
 import bibtex._
 import strings._
 
-class Wizard(val repl: ActorRef, val console: ActorRef, val settings: Settings) extends Module {
+class Wizard(val ctx: Context) extends Module {
   val name = "wizard"
-
-  override val dependsOn = Set("results")
 
   lazy val resultsModule = modules("results")
 
@@ -26,7 +24,7 @@ class Wizard(val repl: ActorRef, val console: ActorRef, val settings: Settings) 
         case _ =>
       }
 
-      sender ! CommandSuccess
+      sender ! CommandProcessed
     case Command2("edit", Indices(ids)) =>
       syncMessage[SearchResults](resultsModule, GetResults(ids)) match {
         case Some(SearchResults(res)) =>
@@ -37,7 +35,7 @@ class Wizard(val repl: ActorRef, val console: ActorRef, val settings: Settings) 
           console ! Error("Invalid index")
       }
 
-      sender ! CommandSuccess
+      sender ! CommandProcessed
 
     case x =>
       super.receive(x)

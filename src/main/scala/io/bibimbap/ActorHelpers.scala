@@ -10,6 +10,8 @@ import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext
 
 trait ActorHelpers extends Actor {
+  implicit val ec: ExecutionContext = context.system.dispatcher
+
   val fastTimeout: Timeout  = Timeout(5.seconds)
   val neverTimeout: Timeout = Timeout(10.hour)
   implicit val timeout: Timeout = neverTimeout

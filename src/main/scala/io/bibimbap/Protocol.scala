@@ -23,17 +23,18 @@ case class Success(msg: String) extends LogMsg;
 // Interaction between the REPL and modules
 trait Command
 case class InputCommand(line: String) extends Command
-case class OnStartup(modules: Map[String, ActorRef]) extends Command;
+case class InitializeModule(modules: Map[String, ActorRef]) extends Command;
+case class ModuleInitialized(name: String) extends Command;
 case object Shutdown extends Command;
 
 abstract class CommandResult
-case class CommandError(msg: String) extends CommandResult
-case class CommandException(e: Throwable) extends CommandResult
-case object CommandSuccess extends CommandResult
-case object CommandUnknown extends CommandResult
+case object CommandProcessed extends CommandResult
+case object CommandUnknown   extends CommandResult
 
-case class Complete(buffer: String, pos: Int) extends Command
-case class Completed(candidates: List[String], index: Int) extends Command
+case object InitializeSource extends Command
+
+case class AutoComplete(buffer: String, pos: Int) extends Command
+case class AutoCompleted(candidates: List[String], index: Int) extends Command
 
 // Protocol to/from search module
 //  => Search(terms)
