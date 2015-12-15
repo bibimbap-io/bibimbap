@@ -1,3 +1,6 @@
+import sbtassembly.Plugin._
+import AssemblyKeys._
+
 seq(assemblySettings : _*)
 
 organization := "io.bibimbap"
@@ -32,3 +35,10 @@ libraryDependencies ++= Seq(
 )
 
 mainClass in (Compile, run) := Some("io.bibimbap.Main")
+
+mergeStrategy in assembly := {
+  case x if x.contains("org/apache/commons/logging/") => println(x); MergeStrategy.first
+  case x =>
+    val old = (mergeStrategy in assembly).value
+    old(x)
+}
